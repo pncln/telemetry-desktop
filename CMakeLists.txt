@@ -53,12 +53,6 @@ else()
     endif()
 endif()
 
-set(TELEGRAM_UI_KIT_RESOURCES
-    telegram-ui-kit/telegram-styles.css
-)
-
-qt_add_resources(TELEGRAM_UI_KIT_RCC ${TELEGRAM_UI_KIT_RESOURCES})
-
 target_sources(${PROJECT_NAME} PRIVATE
     ${EXISTING_SOURCES}
     ${TELEGRAM_UI_KIT_RCC}

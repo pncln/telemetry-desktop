@@ -16,73 +16,37 @@
 #include <QDateTimeAxis>
 #include <QtCharts>
 
+#include <QSurfaceFormat>
+#include <QWindow>
+#include <QTimer>
+#include <QProgressDialog>
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , process(new QProcess(this))
 {
     ui->setupUi(this);
-
-    connect(process, &QProcess::readyReadStandardOutput, this, &MainWindow::onProcessReadyRead);
-    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &MainWindow::onProcessFinished);
-    connect(process, &QProcess::errorOccurred, this, &MainWindow::onProcessErrorOccurred);
-    connect(process, &QProcess::stateChanged, this, &MainWindow::onProcessStateChanged);
 }
+
 
 MainWindow::~MainWindow()
 {
-    if (process->state() == QProcess::Running) {
-        disconnect(process, nullptr, this, nullptr);
-        process->terminate();
-        if (!process->waitForFinished(3000)) {
-            process->kill();
-        }
-    }
-
-    delete process;
     delete ui;
 }
 
-// void MainWindow::on_pushButton_clicked()
-// {
-//     ui->textEdit->append("[" + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + "] " + "The model has started, please wait...");
-//     qDebug() << "onPushButtonClicked called";
-//     if (process->state() == QProcess::Running) {
-//         QMessageBox::warning(this, "Warning", "The process is already running.");
-//         return;
-//     }
-
-//     QString executablePath = QDir::cleanPath(QCoreApplication::applicationDirPath() + "../../../../defaultCode");
-//     qDebug() << executablePath;
-
-//     QFile file(executablePath);
-//     if (!file.exists()) {
-//         QMessageBox::warning(this, "File Not Found", "The specified executable file does not exist.");
-//         return;
-//     }
-
-//     ui->pushButton->setEnabled(false);
-
-//     process->setProcessChannelMode(QProcess::MergedChannels);
-//     process->start(executablePath);
-
-//     if (!process->waitForStarted()) {
-//         QMessageBox::critical(this, "Error", "Failed to start the model.");
-//         ui->pushButton->setEnabled(true);
-//     } else {
-//         QWidget* newTab = new QWidget(ui->tabWidget); // Create a new QWidget
-//         ui->tabWidget->addTab(newTab, "Graphs");
-
-//         QString windowId = "PYTHON_APP_WINDOW_ID";
-
-//         // Embed the Python app window into the tab
-//         QWidget* embeddedWindow = QWidget::createWindowContainer(QWindow::fromWinId(windowId.toULong()), newTab);
-//         embeddedWindow->setParent(newTab);
-//     }
-// }
-
 void MainWindow::on_pushButton_clicked()
 {
+    QProgressDialog progress("Loading data...", "Cancel", 0, 100, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.setValue(0);
+    progress.setWindowTitle("Processing Data");
+    progress.setLabelText("Preparing to load data...");
+
+    // Get the total number of lines in the file
+    qint64 totalLines = 0;
+
+    
     if (dataCsvPath.isEmpty()) {
         QMessageBox::warning(this, "Warning", "Please select a CSV file first.");
         return;
@@ -93,7 +57,10 @@ void MainWindow::on_pushButton_clicked()
         QMessageBox::critical(this, "Error", "Could not open the input file.");
         return;
     }
+
+
     QString outputFilePath = QDir::cleanPath(QCoreApplication::applicationDirPath() + "../../../../output_dataset.csv");
+    qDebug() << outputFilePath;
     QFile outputFile(outputFilePath);
     if (!outputFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QMessageBox::critical(this, "Error", "Could not create the output file.");
@@ -111,8 +78,15 @@ void MainWindow::on_pushButton_clicked()
     double minMetric1 = std::numeric_limits<double>::max();
     double maxMetric1 = std::numeric_limits<double>::lowest();
     bool skipNextLine = false;
+
+    
+
+    qint64 processedLines = 0;
+
     while (!in.atEnd()) {
-    QString line = in.readLine();
+        QString line = in.readLine();
+        
+          
         if (line.startsWith("Mnemonic:")) {
             currentDevice = line.split(":").at(1).trimmed();
             skipNextLine = true;
@@ -126,7 +100,7 @@ void MainWindow::on_pushButton_clicked()
             if (parts.size() >= 2) {
                 QString date = parts[0].trimmed();
                 QString metric1 = parts[1].trimmed();
-                
+
                 // Only write the line if metric1 is not zero
                 if (metric1.toDouble() != 0.0) {
                     out << date << "," << currentDevice << "," << metric1 << "," << currentUnits << "\n";
@@ -135,7 +109,10 @@ void MainWindow::on_pushButton_clicked()
         } else {
             skipNextLine = false;
         }
-    } 
+    }
+
+    progress.setValue(100);
+    progress.setLabelText("Data loaded successfully!");
 
     inputFile.close();
     outputFile.close();
@@ -167,12 +144,32 @@ void MainWindow::on_pushButton_clicked()
 
     // Reopen the output file to read the processed data
     QFile processedFile(outputFilePath);
+    
+    while (!in.atEnd()) {
+        in.readLine();
+        totalLines++;
+    }
+    in.seek(0);  // Reset to the beginning of the file
     if (processedFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QTextStream in(&processedFile);
         in.readLine(); // Skip header
 
         while (!in.atEnd()) {
             QString line = in.readLine();
+            processedLines++;
+
+            // Update progress every 100 lines or so
+            if (processedLines % 100 == 0) {
+                int percentage = (processedLines * 100) / totalLines;
+                progress.setValue(percentage);
+                progress.setLabelText(QString("Loading data... %1%").arg(percentage));
+                QApplication::processEvents();  // Allow GUI updates
+
+                if (progress.wasCanceled()) {
+                    // Handle cancellation
+                    break;
+                    }
+            }
             QStringList parts = line.split(",");
             if (parts.size() >= 4) {
                 QString date = parts[0];
@@ -218,6 +215,7 @@ void MainWindow::on_pushButton_clicked()
     QChartView *chartView = new QChartView(chart);
     chartView->setRenderHint(QPainter::Antialiasing);
 
+
     chartView->setRubberBand(QChartView::RectangleRubberBand);
     chartView->setInteractive(true);
 
@@ -249,89 +247,7 @@ void MainWindow::on_pushButton_clicked()
     ui->graphicsView->setScene(new QGraphicsScene(this));
     ui->graphicsView->scene()->addItem(proxy);
     proxy->setGeometry(QRectF(0, 0, ui->graphicsView->width(), ui->graphicsView->height()));
-
-    
 }
-
-void MainWindow::onProcessReadyRead()
-{
-    qDebug() << "Process output available";
-    if (process->state() != QProcess::Running) {
-        qDebug() << "Process is not running, ignoring output";
-        return;
-    }
-    QByteArray output = process->readAllStandardOutput();
-    qDebug() << "Output received: " << output;
-    ui->textEdit->append("[" + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + "] " + QString::fromLocal8Bit(output));
-}
-
-void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
-{
-    qDebug() << "Process finished with exit code:" << exitCode << "and exit status:" << exitStatus;
-    ui->pushButton->setEnabled(true);
-}
-
-void MainWindow::onProcessErrorOccurred(QProcess::ProcessError error)
-{
-    QString errorMessage;
-    switch (error) {
-    case QProcess::FailedToStart:
-        errorMessage = "The process failed to start.";
-        break;
-    case QProcess::Crashed:
-        errorMessage = "The process crashed.";
-        break;
-    case QProcess::Timedout:
-        errorMessage = "The process timed out.";
-        break;
-    case QProcess::ReadError:
-        errorMessage = "An error occurred while reading the process output.";
-        break;
-    case QProcess::WriteError:
-        errorMessage = "An error occurred while writing to the process.";
-        break;
-    case QProcess::UnknownError:
-    default:
-        errorMessage = "An unknown error occurred.";
-        break;
-    }
-
-    QMessageBox::critical(this, "Process Error", errorMessage);
-    ui->pushButton->setEnabled(true);
-}
-
-void MainWindow::closeEvent(QCloseEvent *event)
-{
-    if (process->state() == QProcess::Running) {
-        disconnect(process, nullptr, this, nullptr);
-        process->terminate();
-        if (!process->waitForFinished(3000)) {
-            process->kill();
-        }
-    }
-
-    event->accept();
-}
-
-void MainWindow::onProcessStateChanged(QProcess::ProcessState newState)
-{
-    switch (newState) {
-
-    case QProcess::NotRunning:
-        ui->textEdit->append("[" + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + "] " + "DEBUG: Process is not running.");
-        ui->pushButton->setEnabled(true);
-        break;
-    case QProcess::Starting:
-        ui->textEdit->append("[" + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + "] " + "DEBUG: Process is starting...");
-        break;
-    case QProcess::Running:
-        ui->textEdit->append("[" + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + "] " + "DEBUG: Process is running.");
-        break;
-    }
-    
-}
-
-
 
 void MainWindow::on_pushButton_2_clicked()
 {
@@ -343,14 +259,14 @@ void MainWindow::on_dataPathButton_clicked()
 {
     QString dataCsvPath = QFileDialog::getOpenFileName(this,
         tr("Open CSV File"), "", tr("CSV Files (*.csv)"));
-    
+
     if (!dataCsvPath.isEmpty()) {
         // Save the path to a member variable if you want to use it later
         this->dataCsvPath = dataCsvPath;
-        
+
         // Optionally, you can display the selected path in a QLineEdit or QLabel
         ui->dataPathEdit->setText(dataCsvPath);
-        
+
         qDebug() << "Selected CSV file:" << dataCsvPath;
     }
 }
@@ -363,4 +279,3 @@ void MainWindow::saveChartAsImage()
         pixmap.save(fileName);
     }
 }
-

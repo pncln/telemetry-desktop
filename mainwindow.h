@@ -19,16 +19,11 @@ public:
     ~MainWindow();
 
 protected:
-    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     void on_pushButton_clicked();
-    void onProcessReadyRead();
-    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
-    void onProcessErrorOccurred(QProcess::ProcessError error);
 
     void on_pushButton_2_clicked();
-    void onProcessStateChanged(QProcess::ProcessState newState);
 
     void on_dataPathButton_clicked();
     void saveChartAsImage();
